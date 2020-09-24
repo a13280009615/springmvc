@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<web-app xmlns="http://xmlns.jcp.org/xml/ns/javaee"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://xmlns.jcp.org/xml/ns/javaee http://xmlns.jcp.org/xml/ns/javaee/web-app_4_0.xsd"
+         version="4.0">
+
+    <welcome-file-list>
+        <welcome-file>index.jsp</welcome-file>
+    </welcome-file-list>
+
+<!--    DispatcherServlet  就是前端控制器 处理前端所有的请求 -->
+    <servlet>
+        <servlet-name>springDispatcherServlet</servlet-name>
+        <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+        <init-param>
+    <!--  contextConfigLocation 加载配置文件 如果不指定 默认去找 /WEB-INF/springDispatcherServlet-servlet.xml-->
+            <param-name>contextConfigLocation</param-name>
+            <param-value>classpath:springmvc.xml</param-value>
+        </init-param>
+     <!-- servlet默认情况下是在获取的时候才会创建 这个标签容器在容器启动的时候创建
+          数值越小 优先级越高 越先加载 -->
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>springDispatcherServlet</servlet-name>
+    <!-- / 和 /* 都是请求所有路径  /* 的话  jsp将无法访问
+
+    项目的 web.xml  继承与 服务器的web.xml
+
+    服务器的web.xml中有一个defaultServlet 是 url-pattern /
+     在tomcat 中是处理静态资源的
+    我们配置中的前端控制器的url-pattern 也是 / 就相当于禁用了 tomcat的服务器的
+    defaultServlet  静态资源就会来到 前端控制器 看那个方法的 @RequestMapping
+    是这个 index.html
+    主要的作用是 配合 restful 风格的url
+    -->
+        <url-pattern>/</url-pattern>
+    </servlet-mapping>
+
+
+
+</web-app>
