@@ -5,8 +5,8 @@
       返回值 HandlerExecutionChain就是一个处理器执行链
         getHandler()内部做了一个for循环遍历当前的handlerMappings
         handlerMapping 处理器映射器 他里面保存了每一个处理器能处理那些请求的映射信息是从
-        handlerMap中就是保存的 路径 和处理器的一一对应  ioc容器启动创建处理器对象的时候扫描每个处理器
-        都能处理哪个请求，保存在HandlerMapping的handlerMap属性中 下一次请求过来就直接来看
+        handlerMap中保存的 保存的是路径和处理器的一一对应  (ioc容器启动创建处理器对象的时候扫描每个处理器
+        都能处理哪个请求，保存在HandlerMapping的handlerMap属性中 下一次请求过来就直接来看)
         哪个HandlerMapping中有这个请求映射 注解是使用的 DefaultAnnotationHandlerMapping
         spring 3.0 使用的是BeanNameUrlHandlerMapping
 
@@ -19,8 +19,283 @@
         不为空才会返回这个AnnotationMethodHandlerAdapter 这个对象
     
     3) 使用刚才获取到的适配器执行目标方法AnnotationMethodHandlerAdapter执行方法
-     ha.handle(processedRequest, response, mappedHandler.getHandler());
+     ha.handle(processedRequest, response, mappedHandler.getHandler())
+      内部其实是
+       // 一个请求对象 一个响应对象  还有一个处理器
+       invokeHandlerMethod(request, response, handler);
+       protected ModelAndView invokeHandlerMethod(HttpServletRequest request, HttpServletResponse response, Object handler)
+       			throws Exception {
+             //根据处理器 拿到方法的解析器
+       		ServletHandlerMethodResolver methodResolver = getMethodResolver(handler);
+       		//方法解析器根据当前请求找到真正的目标方法
+       		Method handlerMethod = methodResolver.resolveHandlerMethod(request);
+       		//创建了一个方法执行器
+       		ServletHandlerMethodInvoker methodInvoker = new ServletHandlerMethodInvoker(methodResolver);
+       		//封装原生的request  response
+       		ServletWebRequest webRequest = new ServletWebRequest(request, response);
+       		//创建了一个 BindingAwareModelMap(); 隐含模型
+       		ExtendedModelMap implicitModel = new BindingAwareModelMap();
+            //方法执行器执行处理器方法 真正的执行目标方法
+            //目标方法利用反射执行期间确定参数 提前执行modelAttribute等所有的操作都在这个方法中
+       		Object result = methodInvoker.invokeHandlerMethod(handlerMethod, handler, webRequest, implicitModel);
+       		ModelAndView mav =
+       				methodInvoker.getModelAndView(handlerMethod, handler.getClass(), result, implicitModel, webRequest);
+       		methodInvoker.updateModelAttributes(handler, (mav != null ? mav.getModel() : null), implicitModel, webRequest);
+       		return mav;
+       	}
+
+
     4) 目标方法执行之后会返回一个ModelAndView对象
+       	public final Object invokeHandlerMethod(Method handlerMethod, Object handler,
+       			NativeWebRequest webRequest, ExtendedModelMap implicitModel) throws Exception {
+             //定位到了这个方法
+       		Method handlerMethodToInvoke = BridgeMethodResolver.findBridgedMethod(handlerMethod);
+       		try {
+       			boolean debug = logger.isDebugEnabled();
+       			// 主要是针对SessionAttribute注解的类  获取实际属性名称
+       			for (String attrName : this.methodResolver.getActualSessionAttributeNames()) {
+       				Object attrValue = this.sessionAttributeStore.retrieveAttribute(webRequest, attrName);
+       				if (attrValue != null) {
+       				   // 在隐含模型BindingAwareModelMap 存储一份 也就是顺便保存在 request作用域中
+       					implicitModel.addAttribute(attrName, attrValue);
+       				}
+       			}
+       			//获取所有的ModelAttribute注解的方法
+       			for (Method attributeMethod : this.methodResolver.getModelAttributeMethods()) {
+       				Method attributeMethodToInvoke = BridgeMethodResolver.findBridgedMethod(attributeMethod);
+       				//确定ModelAttribute注解的方法执行时要使用的每一个参数的值
+       				 创建了一个和参数个数一样的数组 会用来保存每一个参数的值
+       				Object[] args = resolveHandlerArguments(attributeMethodToInvoke, handler, webRequest, implicitModel);
+       				if (debug) {
+       					logger.debug("Invoking model attribute method: " + attributeMethodToInvoke);
+       				}
+       				String attrName = AnnotationUtils.findAnnotation(attributeMethod, ModelAttribute.class).value();
+       				if (!"".equals(attrName) && implicitModel.containsAttribute(attrName)) {
+       					continue;
+       				}
+       				ReflectionUtils.makeAccessible(attributeMethodToInvoke);
+       				//提前运行ModelAttribute注解的方法
+       				Object attrValue = attributeMethodToInvoke.invoke(handler, args);
+       				if ("".equals(attrName)) {
+       					Class<?> resolvedType = GenericTypeResolver.resolveReturnType(attributeMethodToInvoke, handler.getClass());
+       					attrName = Conventions.getVariableNameForReturnType(attributeMethodToInvoke, resolvedType, attrValue);
+       				}
+       				if (!implicitModel.containsAttribute(attrName)) {
+       				//并将 ModelAttribute注解的方法执行后的方法的返回值
+                    //作为key也放在隐含模型中 默认的key 为 返回值首字母小写 如果没有返回值 key 为 void
+       					implicitModel.addAttribute(attrName, attrValue);
+       				}
+       			}
+       			//再一次解析目标方法参数是那些值
+       			Object[] args = resolveHandlerArguments(handlerMethodToInvoke, handler, webRequest, implicitModel);
+       			if (debug) {
+       				logger.debug("Invoking request handler method: " + handlerMethodToInvoke);
+       			}
+       			ReflectionUtils.makeAccessible(handlerMethodToInvoke);
+       			//执行目标方法
+       			return handlerMethodToInvoke.invoke(handler, args);
+       		}
+       		catch (IllegalStateException ex) {
+       			// Internal assertion failed (e.g. invalid signature):
+       			// throw exception with full handler method context...
+       			throw new HandlerMethodInvocationException(handlerMethodToInvoke, ex);
+       		}
+       		catch (InvocationTargetException ex) {
+       			// User-defined @ModelAttribute/@InitBinder/@RequestMapping method threw an exception...
+       			ReflectionUtils.rethrowException(ex.getTargetException());
+       			return null;
+       		}
+       	}
+
+       	//解析处理器的参数  如何确定方法的每一个参数的值
+       	private Object[] resolveHandlerArguments(Method handlerMethod, Object handler,
+        			NativeWebRequest webRequest, ExtendedModelMap implicitModel) throws Exception {
+               //拿到所有的参数的类型
+        		Class<?>[] paramTypes = handlerMethod.getParameterTypes();
+        		//创建了所有参数个数的数组
+        		Object[] args = new Object[paramTypes.length];
+
+        		for (int i = 0; i < args.length; i++) {
+        		//便利所有的参数 如果不是普通参数 先看是否是原生api 在看 是否是Model或者Map 如果是就传入隐含模型
+        			MethodParameter methodParam = new SynthesizingMethodParameter(handlerMethod, i);
+        			methodParam.initParameterNameDiscovery(this.parameterNameDiscoverer);
+        			GenericTypeResolver.resolveParameterType(methodParam, handler.getClass());
+        			String paramName = null;
+        			String headerName = null;
+        			boolean requestBodyFound = false;
+        			String cookieName = null;
+        			String pathVarName = null;
+        			String attrName = null;
+        			boolean required = false;
+        			String defaultValue = null;
+        			boolean validate = false;
+        			Object[] validationHints = null;
+        			int annotationsFound = 0;
+        			//检查该参数 是否有注解
+        			Annotation[] paramAnns = methodParam.getParameterAnnotations();
+
+        			for (Annotation paramAnn : paramAnns) {
+        				if (RequestParam.class.isInstance(paramAnn)) {
+        					RequestParam requestParam = (RequestParam) paramAnn;
+        					paramName = requestParam.name();
+        					required = requestParam.required();
+        					defaultValue = parseDefaultValueAttribute(requestParam.defaultValue());
+        					annotationsFound++;
+        				}
+        				else if (RequestHeader.class.isInstance(paramAnn)) {
+        					RequestHeader requestHeader = (RequestHeader) paramAnn;
+        					headerName = requestHeader.name();
+        					required = requestHeader.required();
+        					defaultValue = parseDefaultValueAttribute(requestHeader.defaultValue());
+        					annotationsFound++;
+        				}
+        				else if (RequestBody.class.isInstance(paramAnn)) {
+        					requestBodyFound = true;
+        					annotationsFound++;
+        				}
+        				else if (CookieValue.class.isInstance(paramAnn)) {
+        					CookieValue cookieValue = (CookieValue) paramAnn;
+        					cookieName = cookieValue.name();
+        					required = cookieValue.required();
+        					defaultValue = parseDefaultValueAttribute(cookieValue.defaultValue());
+        					annotationsFound++;
+        				}
+        				else if (PathVariable.class.isInstance(paramAnn)) {
+        					PathVariable pathVar = (PathVariable) paramAnn;
+        					pathVarName = pathVar.value();
+        					annotationsFound++;
+        				}
+        				else if (ModelAttribute.class.isInstance(paramAnn)) {
+        					ModelAttribute attr = (ModelAttribute) paramAnn;
+        					attrName = attr.value();
+        					annotationsFound++;
+        				}
+        				else if (Value.class.isInstance(paramAnn)) {
+        					defaultValue = ((Value) paramAnn).value();
+        				}
+        				else {
+        					Validated validatedAnn = AnnotationUtils.getAnnotation(paramAnn, Validated.class);
+        					if (validatedAnn != null || paramAnn.annotationType().getSimpleName().startsWith("Valid")) {
+        						validate = true;
+        						Object hints = (validatedAnn != null ? validatedAnn.value() : AnnotationUtils.getValue(paramAnn));
+        						validationHints = (hints instanceof Object[] ? (Object[]) hints : new Object[]{hints});
+        					}
+        				}
+        			}
+
+        			if (annotationsFound > 1) {
+        				throw new IllegalStateException("Handler parameter annotations are exclusive choices - " +
+        						"do not specify more than one such annotation on the same parameter: " + handlerMethod);
+        			}
+
+        			if (annotationsFound == 0) {
+        				Object argValue = resolveCommonArgument(methodParam, webRequest);
+        				if (argValue != WebArgumentResolver.UNRESOLVED) {
+        					args[i] = argValue;
+        				}
+        				else if (defaultValue != null) {
+        					args[i] = resolveDefaultValue(defaultValue);
+        				}
+        				else {
+        					Class<?> paramType = methodParam.getParameterType();
+        					if (Model.class.isAssignableFrom(paramType) || Map.class.isAssignableFrom(paramType)) {
+        						if (!paramType.isAssignableFrom(implicitModel.getClass())) {
+        							throw new IllegalStateException("Argument [" + paramType.getSimpleName() + "] is of type " +
+        									"Model or Map but is not assignable from the actual model. You may need to switch " +
+        									"newer MVC infrastructure classes to use this argument.");
+        						}
+        						args[i] = implicitModel;
+        					}
+        					else if (SessionStatus.class.isAssignableFrom(paramType)) {
+        						args[i] = this.sessionStatus;
+        					}
+        					else if (HttpEntity.class.isAssignableFrom(paramType)) {
+        						args[i] = resolveHttpEntityRequest(methodParam, webRequest);
+        					}
+        					else if (Errors.class.isAssignableFrom(paramType)) {
+        						throw new IllegalStateException("Errors/BindingResult argument declared " +
+        								"without preceding model attribute. Check your handler method signature!");
+        					}
+        					else if (BeanUtils.isSimpleProperty(paramType)) {
+        						paramName = "";
+        					}
+        					else {
+        						attrName = "";
+        					}
+        				}
+        			}
+                    //确定值得环节
+        			if (paramName != null) {
+        				args[i] = resolveRequestParam(paramName, required, defaultValue, methodParam, webRequest, handler);
+        			}
+        			else if (headerName != null) {
+        				args[i] = resolveRequestHeader(headerName, required, defaultValue, methodParam, webRequest, handler);
+        			}
+        			else if (requestBodyFound) {
+        				args[i] = resolveRequestBody(methodParam, webRequest, handler);
+        			}
+        			else if (cookieName != null) {
+        				args[i] = resolveCookieValue(cookieName, required, defaultValue, methodParam, webRequest, handler);
+        			}
+        			else if (pathVarName != null) {
+        				args[i] = resolvePathVariable(pathVarName, methodParam, webRequest, handler);
+        			}
+        			//确定自定义类型参数的值 还要讲请求中的每一个参数赋值给这个对象
+        			else if (attrName != null) {
+        				WebDataBinder binder =
+        						resolveModelAttribute(attrName, methodParam, implicitModel, webRequest, handler);
+        				boolean assignBindingResult = (args.length > i + 1 && Errors.class.isAssignableFrom(paramTypes[i + 1]));
+        				if (binder.getTarget() != null) {
+        				   //确定自定义参数的值
+        					doBind(binder, webRequest, validate, validationHints, !assignBindingResult);
+        				}
+        				args[i] = binder.getTarget();
+        				if (assignBindingResult) {
+        					args[i + 1] = binder.getBindingResult();
+        					i++;
+        				}
+        				implicitModel.putAll(binder.getBindingResult().getModel());
+        			}
+        		}
+
+        		return args;
+        	}
+
+
+   确定自定义参数类型方法
+	private WebDataBinder resolveModelAttribute(String attrName, MethodParameter methodParam,
+			ExtendedModelMap implicitModel, NativeWebRequest webRequest, Object handler) throws Exception {
+
+		// Bind request parameter onto object...
+		String name = attrName;
+		if ("".equals(name)) {
+		    // 如果 attrName是空串 就将参数类型的首字母小写作为值
+			name = Conventions.getVariableNameForParameter(methodParam);
+		}
+		Class<?> paramType = methodParam.getParameterType();
+		//确定目标对象的值  springMVC 确定pojo值得三步
+		Object bindObject;
+		//如果隐含模型中有这个值 就从隐含模型中拿
+		if (implicitModel.containsKey(name)) {
+			bindObject = implicitModel.get(name);
+		}
+		//如果该参数标注了 sessionAttribute 就从 session中拿
+		else if (this.methodResolver.isSessionAttribute(name, paramType)) {
+			bindObject = this.sessionAttributeStore.retrieveAttribute(webRequest, name);
+			if (bindObject == null) {
+				raiseSessionRequiredException("Session attribute '" + name + "' required - not found in session");
+			}
+		}
+		//如果都不是 就利用反射创建对象
+		else {
+			bindObject = BeanUtils.instantiateClass(paramType);
+		}
+		WebDataBinder binder = createBinder(webRequest, bindObject, name);
+		initBinder(handler, name, binder, webRequest);
+		return binder;
+	}
+
+
     5) 根据ModelAndView的信息转发到具体的页面 并可以在请求域中获取ModelAndView中的模型数据
 
 
@@ -120,6 +395,21 @@ protected void doDispatch(HttpServletRequest request, HttpServletResponse respon
 			}
 		}
 	}
+
+总结：
+  spring mvc 确定方法每个参数的值
+    1标注注解 保存注解的信息 最终得到这个注解对应解析的值
+    2没标注解
+             1先看是否是原生API
+             2看是否是Model或者Map
+             3都不是再看是否是简单类型
+             4给attrName赋值 (参数标了 ModelAttribute注解 就是@ModelAttribute("指定的值")
+             没有标的话就是 "")
+                1attrNme 使用参数的类型首字母小写 或者使用之前@ModelAttribute("指定的值")
+                2 先看隐含模型中有没有attrName作为key对应的值 如果有则直接从隐含模型中拿
+                3 再看@SessionAttribute("指定的值")  如果有则直接从session中拿 如果拿不到会报错
+             5 如果以上都不是 利用反射创建对象并将参数封装成对象
+
 
 ------------------------------------------------------------------------------------------------------------------------
 DispacherServlet 中有几个引用类型的属性： springMVC的9大组件
