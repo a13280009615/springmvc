@@ -14,5 +14,8 @@
 <a href="hello">视图解析器</a>
 <a href="handle1">forward</a>
 <a href="handle3">redirect</a>
+<a href="welcome">跳转测试 i18n</a>
+<hr/>
+<a href="handlePlus">下载资源</a>
 </body>
 </html>

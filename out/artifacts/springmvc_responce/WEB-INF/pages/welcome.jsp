@@ -1,21 +1,20 @@
 <%--
   Created by IntelliJ IDEA.
   User: Administrator
-  Date: 2020/9/26
-  Time: 12:38
+  Date: 2020/9/30
+  Time: 15:27
   To change this template use File | Settings | File Templates.
 --%>
 <%@ page contentType="text/html;charset=UTF-8" language="java" %>
+<%@ taglib prefix="fmt" uri="http://java.sun.com/jsp/jstl/fmt"%>
 <html>
 <head>
     <title>Title</title>
 </head>
 <body>
-<a href="hello">视图解析器</a>
-<a href="handle1">forward</a>
-<a href="handle3">redirect</a>
-<a href="welcome">跳转测试 i18n</a>
-<hr/>
-<a href="handlePlus">下载资源</a>
+
+<fmt:message key="welcomeInfo"></fmt:message>
+<fmt:message key="username"></fmt:message>
+
 </body>
 </html>

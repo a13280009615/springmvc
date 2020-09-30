@@ -2,13 +2,36 @@
 <beans xmlns="http://www.springframework.org/schema/beans"
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xmlns:context="http://www.springframework.org/schema/context"
-       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
+       xmlns:mvc="http://www.springframework.org/schema/mvc"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc.xsd">
 
 
     <context:component-scan base-package="com.zf"/>
 
+
+
     <bean id="viewResolver" class="org.springframework.web.servlet.view.InternalResourceViewResolver">
         <property name="prefix" value="/WEB-INF/pages/"/>
         <property name="suffix" value=".jsp"/>
+        <property name="viewClass" value="org.springframework.web.servlet.view.JstlView"/>
     </bean>
+
+
+    <!-- 自定义视图解析器  数字越小 优先级越高   -->
+    <bean  class="com.zf.viewresolver.MyViewResolver">
+      <property name="order" value="1"/>
+    </bean>
+
+    <bean id="messageSource" class="org.springframework.context.support.ResourceBundleMessageSource">
+        <property name="basename" value="i18n"/>
+    </bean>
+
+
+       <!--  假设发一个请求 来到 一个页面 不需要处理 写方法太麻烦
+         配置了这个 其他的请求就不能用了 需要 配置 mvc:annotation-drive 开启注解驱动
+         -->
+    <mvc:view-controller path="welcome" view-name="success"/>
+    <!--  开启 mvc注解驱动模式-->
+    <mvc:annotation-driven/>
+
 </beans>

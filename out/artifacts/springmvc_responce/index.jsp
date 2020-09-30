@@ -20,5 +20,7 @@
 <a href="handle3">modelMap传值</a>
 
 <a href="handle4">modelandview</a>
+
+<a href="welcome">跳转测试 i18n</a>
 </body>
 </html>
