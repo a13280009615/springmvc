@@ -1,0 +1,175 @@
+
+1方法执行后的返回值 会作为页面地址参考转发或者重定向到页面
+2视图解析器可能会进行页面地址的拼串
+
+
+流程:
+1 任何方法的返回值最终都会被封装成ModelAndView对象
+2 processDispatchResult(processedRequest, response, mappedHandler, mv, dispatchException);
+处理来到页面的逻辑 视图渲染流程:将域中的数据在页面展示
+
+3 render(mv, request, response);渲染页面
+
+4 View view 与ViewResolver【ViewResolver的作用就是根据视图名(方法的返回值)得到 view对象
+ ViewResolver接口中的方法:View resolveViewName(String viewName, Locale locale)】
+
+5 怎么能根据方法的返回值(视图名) 得到view 对象
+
+
+protected View resolveViewName(String viewName, Map<String, Object> model, Locale locale,
+			HttpServletRequest request) throws Exception {
+        // 拿到IOC容器中所有的viewResolver 没有配置的话使用默认的策略
+		for (ViewResolver viewResolver : this.viewResolvers) {
+		 //视图解析器根据方法的返回值 得到一个view对象
+			View view = viewResolver.resolveViewName(viewName, locale);
+			if (view != null) {
+				return view;
+			}
+		}
+		return null;
+	}
+
+
+resolveViewName方法 就是先从缓存中拿
+
+
+public View resolveViewName(String viewName, Locale locale) throws Exception {
+		if (!isCache()) {
+			return createView(viewName, locale);
+		}
+		else {
+			Object cacheKey = getCacheKey(viewName, locale);
+			View view = this.viewAccessCache.get(cacheKey);
+			if (view == null) {
+				synchronized (this.viewCreationCache) {
+					view = this.viewCreationCache.get(cacheKey);
+					if (view == null) {
+						//如果缓存中没有的话 创建
+						view = createView(viewName, locale);
+						if (view == null && this.cacheUnresolved) {
+							view = UNRESOLVED_VIEW;
+						}
+						if (view != null) {
+							this.viewAccessCache.put(cacheKey, view);
+							this.viewCreationCache.put(cacheKey, view);
+							if (logger.isTraceEnabled()) {
+								logger.trace("Cached view [" + cacheKey + "]");
+							}
+						}
+					}
+				}
+			}
+			return (view != UNRESOLVED_VIEW ? view : null);
+		}
+	}
+
+
+创建 View对象
+
+	protected View createView(String viewName, Locale locale) throws Exception {
+		// If this resolver is not supposed to handle the given view,
+		// return null to pass on to the next resolver in the chain.
+		if (!canHandle(viewName, locale)) {
+			return null;
+		}
+		// 检查是否是 redirect 前缀的  new RedirectView()
+		if (viewName.startsWith(REDIRECT_URL_PREFIX)) {
+			String redirectUrl = viewName.substring(REDIRECT_URL_PREFIX.length());
+			RedirectView view = new RedirectView(redirectUrl, isRedirectContextRelative(), isRedirectHttp10Compatible());
+			view.setHosts(getRedirectHosts());
+			return applyLifecycleMethods(viewName, view);
+		}
+		// 检查是否是 forward 前缀的  new InternalResourceView()
+		if (viewName.startsWith(FORWARD_URL_PREFIX)) {
+			String forwardUrl = viewName.substring(FORWARD_URL_PREFIX.length());
+			return new InternalResourceView(forwardUrl);
+		}
+		// 否则使用父类默认创建一个View对象
+		return super.createView(viewName, locale);
+	}
+
+返回 View对象
+视图解析器得到View对象的流程就是 所有配置的视图解析器都来尝试根据视图名(返回值)得到View对象
+如果能得到就直接返回  如果得不到就换下一个视图解析器
+2 调用View对象的render方法渲染
+
+public void render(Map<String, ?> model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+		if (logger.isTraceEnabled()) {
+			logger.trace("Rendering view with name '" + this.beanName + "' with model " + model +
+				" and static attributes " + this.staticAttributes);
+		}
+
+		Map<String, Object> mergedModel = createMergedOutputModel(model, request, response);
+		prepareResponse(request, response);
+		//真正的渲染要给页面输出的所有数据
+		renderMergedOutputModel(mergedModel, getRequestToExpose(request), response);
+	}
+
+InternalResourceView
+
+protected void renderMergedOutputModel(
+			Map<String, Object> model, HttpServletRequest request, HttpServletResponse response) throws Exception {
+
+		// 将 ModelMap的数据 暴露在 request域中
+		exposeModelAsRequestAttributes(model, request);
+
+		// Expose helpers as request attributes, if any.
+		exposeHelpers(request);
+
+		// Determine the path for the request dispatcher.
+		String dispatcherPath = prepareForRendering(request, response);
+
+		// Obtain a RequestDispatcher for the target resource (typically a JSP).
+		RequestDispatcher rd = getRequestDispatcher(request, dispatcherPath);
+		if (rd == null) {
+			throw new ServletException("Could not get RequestDispatcher for [" + getUrl() +
+					"]: Check that the corresponding file exists within your web application archive!");
+		}
+
+		// If already included or response already committed, perform include, else forward.
+		if (useInclude(request, response)) {
+			response.setContentType(getContentType());
+			if (logger.isDebugEnabled()) {
+				logger.debug("Including resource [" + getUrl() + "] in InternalResourceView '" + getBeanName() + "'");
+			}
+			rd.include(request, response);
+		}
+
+		else {
+			// Note: The forwarded resource is supposed to determine the content type itself.
+			if (logger.isDebugEnabled()) {
+				logger.debug("Forwarding to resource [" + getUrl() + "] in InternalResourceView '" + getBeanName() + "'");
+			}
+
+			//转发到页面
+			rd.forward(request, response);
+		}
+	}
+
+
+为什么 隐含模型的数据可以在request作用域中能拿到数据就是因为
+protected void exposeModelAsRequestAttributes(Map<String, Object> model, HttpServletRequest request) throws Exception {
+		for (Map.Entry<String, Object> entry : model.entrySet()) {
+			String modelName = entry.getKey();
+			Object modelValue = entry.getValue();
+			if (modelValue != null) {
+			   //遍历所有的modelMap  拿到 key 和 name  放在request域中
+				request.setAttribute(modelName, modelValue);
+
+				if (logger.isDebugEnabled()) {
+					logger.debug("Added model object '" + modelName + "' of type [" + modelValue.getClass().getName() +
+							"] to request in view with name '" + getBeanName() + "'");
+				}
+			}
+			else {
+				request.removeAttribute(modelName);
+				if (logger.isDebugEnabled()) {
+					logger.debug("Removed model object '" + modelName +
+							"' from request in view with name '" + getBeanName() + "'");
+				}
+			}
+		}
+	}
+
+
+视图解析器 就是为了得到视图对象 视图对象才能真正的转发(将隐含模型中全部数据放在请求域中)或者重定向到页面
