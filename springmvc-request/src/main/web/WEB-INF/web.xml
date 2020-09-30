@@ -32,8 +32,8 @@
             <param-value>UTF-8</param-value>
         </init-param>
         <init-param>
-      <!--    forceResponseEncoding 解决响应乱码        -->
-            <param-name>forceResponseEncoding</param-name>
+      <!--    forceEncoding 解决响应乱码        -->
+            <param-name>forceEncoding</param-name>
             <param-value>true</param-value>
         </init-param>
     </filter>
